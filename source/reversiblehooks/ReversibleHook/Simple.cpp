@@ -52,7 +52,11 @@ Simple::Simple(
     DWORD dwProtect[2] = { 0 };
     VirtualProtect((void*)installAddress, maxBytesToProtect, PAGE_EXECUTE_READWRITE, &dwProtect[0]);
 
-    // workaround for hoodlum crashes due to securom protection.
+    // Workaround for Hoodlum crashes due to SecuROM protection.
+    // A leading NOP is only a hint that this may be a Hoodlum reroute. Some supported
+    // executables/functions legitimately have a NOP-prefixed entry without a nearby JMP.
+    // In that case the normal direct hook path below is valid and should not be reported
+    // as a warning, because the hook is still installed successfully at installAddress.
     if (*(uint8*)installAddress == NOP_OPCODE) {
         bool bJumpFound = false;
         uint32 i = 0;
@@ -72,7 +76,7 @@ Simple::Simple(
             InstallHook(true);
         }
         else {
-            NOTSA_LOG_WARN("Couldn't find the jump for address = 0x{:08X}\n", installAddress);
+            NOTSA_LOG_DEBUG("NOP-prefixed function at 0x{:08X} has no Hoodlum JMP; installing direct hook\n", installAddress);
             InstallHook(false);
         }
     }
