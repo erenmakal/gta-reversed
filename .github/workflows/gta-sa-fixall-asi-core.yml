@@ -2,8 +2,7 @@ name: GTA SA FixAll ASI PS2
 
 on:
   push:
-    branches:
-      - build/gta-sa-fixall-asi-core
+    branches: [build/gta-sa-fixall-asi-core]
   workflow_dispatch:
 
 jobs:
@@ -24,252 +23,165 @@ jobs:
           $tmp = Join-Path $PWD 'downloads'
           New-Item -ItemType Directory -Force -Path $root,$scripts,$presets,$tmp | Out-Null
 
-          function Download-Zip([string]$Url, [string]$Name) {
+          function Download-Zip([string]$Url,[string]$Name) {
             $zip = Join-Path $tmp $Name
             Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $zip
             return $zip
           }
-
-          function Expand-Zip([string]$Zip, [string]$Name) {
+          function Expand-Zip([string]$Zip,[string]$Name) {
             $dir = Join-Path $tmp $Name
             if (Test-Path $dir) { Remove-Item $dir -Recurse -Force }
             Expand-Archive -Path $Zip -DestinationPath $dir -Force
             return $dir
           }
-
-          function Copy-SiblingTree([System.IO.FileInfo]$Marker, [string]$Destination) {
-            $sourceDir = $Marker.Directory.FullName
+          function Copy-SiblingTree([System.IO.FileInfo]$Marker,[string]$Destination) {
             New-Item -ItemType Directory -Force -Path $Destination | Out-Null
-            Get-ChildItem $sourceDir -Force | ForEach-Object {
+            Get-ChildItem $Marker.Directory.FullName -Force | ForEach-Object {
               if ($_.Name -notin @('dinput8.dll','vorbisFile.dll','vorbisHooked.dll','ddraw.dll')) {
                 Copy-Item $_.FullName $Destination -Recurse -Force
               }
             }
           }
 
-          # ------------------------------------------------------------------
-          # Core compatibility fixes
-          # ------------------------------------------------------------------
-
-          # SilentPatch SA Build 34.1 - 2026 Update Hotfix #1.
-          $spZip = Download-Zip 'https://github.com/CookiePLMonster/SilentPatch/releases/download/1.1-BUILD34.1-SA/SilentPatchSA.zip' 'SilentPatchSA.zip'
-          $sp = Expand-Zip $spZip 'silentpatch'
-          $spAsi = Get-ChildItem $sp -Recurse -File -Filter 'SilentPatchSA.asi' | Select-Object -First 1
-          $spIni = Get-ChildItem $sp -Recurse -File -Filter 'SilentPatchSA.ini' | Select-Object -First 1
-          if (-not $spAsi -or -not $spIni) { throw 'SilentPatchSA files were not found in official archive.' }
-          Copy-Item $spAsi.FullName (Join-Path $root 'SilentPatchSA.asi') -Force
-          Copy-Item $spIni.FullName (Join-Path $root 'SilentPatchSA.ini') -Force
-
-          # Use the monitor desktop refresh rate. SilentPatch 34.1 yields to another mod
-          # if that mod explicitly chooses a refresh rate.
+          # SilentPatch SA Build 34.1
+          $z = Download-Zip 'https://github.com/CookiePLMonster/SilentPatch/releases/download/1.1-BUILD34.1-SA/SilentPatchSA.zip' 'SilentPatchSA.zip'
+          $d = Expand-Zip $z 'silentpatch'
+          $asi = Get-ChildItem $d -Recurse -File -Filter 'SilentPatchSA.asi' | Select-Object -First 1
+          $ini = Get-ChildItem $d -Recurse -File -Filter 'SilentPatchSA.ini' | Select-Object -First 1
+          if (-not $asi -or -not $ini) { throw 'SilentPatch files not found' }
+          Copy-Item $asi.FullName (Join-Path $root 'SilentPatchSA.asi') -Force
+          Copy-Item $ini.FullName (Join-Path $root 'SilentPatchSA.ini') -Force
           $spIniPath = Join-Path $root 'SilentPatchSA.ini'
-          $spText = Get-Content $spIniPath -Raw
-          if ($spText -match '(?m)^UseDesktopRefreshRate\s*=') {
-            $spText = [regex]::Replace($spText, '(?m)^UseDesktopRefreshRate\s*=.*$', 'UseDesktopRefreshRate=1')
-          } else {
-            $spText += "`r`nUseDesktopRefreshRate=1`r`n"
-          }
-          Set-Content -Path $spIniPath -Value $spText -Encoding ASCII
+          $t = Get-Content $spIniPath -Raw
+          if ($t -match '(?m)^UseDesktopRefreshRate\s*=') {
+            $t = [regex]::Replace($t,'(?m)^UseDesktopRefreshRate\s*=.*$','UseDesktopRefreshRate=1')
+          } else { $t += "`r`nUseDesktopRefreshRate=1`r`n" }
+          Set-Content $spIniPath $t -Encoding ASCII
 
-          # GTASA Widescreen Fix.
-          $wsZip = Download-Zip 'https://github.com/ThirteenAG/WidescreenFixesPack/releases/download/gtasa/GTASA.WidescreenFix.zip' 'GTASA.WidescreenFix.zip'
-          $ws = Expand-Zip $wsZip 'widescreen'
-          $wsAsi = Get-ChildItem $ws -Recurse -File -Filter 'GTASA.WidescreenFix.asi' | Select-Object -First 1
-          $wsIni = Get-ChildItem $ws -Recurse -File -Filter 'GTASA.WidescreenFix.ini' | Select-Object -First 1
-          if (-not $wsAsi -or -not $wsIni) { throw 'GTASA Widescreen Fix files were not found in official archive.' }
-          Copy-Item $wsAsi.FullName (Join-Path $scripts 'GTASA.WidescreenFix.asi') -Force
-          Copy-Item $wsIni.FullName (Join-Path $scripts 'GTASA.WidescreenFix.ini') -Force
-          Get-ChildItem $wsAsi.Directory.FullName -File | Where-Object { $_.Name -notin @('GTASA.WidescreenFix.asi','GTASA.WidescreenFix.ini','dinput8.dll') } | ForEach-Object {
-            Copy-Item $_.FullName $scripts -Force
-          }
+          # Widescreen Fix
+          $z = Download-Zip 'https://github.com/ThirteenAG/WidescreenFixesPack/releases/download/gtasa/GTASA.WidescreenFix.zip' 'GTASA.WidescreenFix.zip'
+          $d = Expand-Zip $z 'widescreen'
+          $asi = Get-ChildItem $d -Recurse -File -Filter 'GTASA.WidescreenFix.asi' | Select-Object -First 1
+          $ini = Get-ChildItem $d -Recurse -File -Filter 'GTASA.WidescreenFix.ini' | Select-Object -First 1
+          if (-not $asi -or -not $ini) { throw 'Widescreen Fix files not found' }
+          Copy-Item $asi.FullName (Join-Path $scripts 'GTASA.WidescreenFix.asi') -Force
+          Copy-Item $ini.FullName (Join-Path $scripts 'GTASA.WidescreenFix.ini') -Force
+          Get-ChildItem $asi.Directory.FullName -File | Where-Object { $_.Name -notin @('GTASA.WidescreenFix.asi','GTASA.WidescreenFix.ini','dinput8.dll') } | ForEach-Object { Copy-Item $_.FullName $scripts -Force }
 
-          # Ultimate ASI Loader x86, loaded as dinput8.dll.
-          $ualZip = Download-Zip 'https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/download/Win32-latest/dinput8-Win32.zip' 'dinput8-Win32.zip'
-          $ual = Expand-Zip $ualZip 'ual'
-          $loader = Get-ChildItem $ual -Recurse -File -Filter 'dinput8.dll' | Select-Object -First 1
-          if (-not $loader) { throw 'Ultimate ASI Loader dinput8.dll was not found.' }
+          # Ultimate ASI Loader x86
+          $z = Download-Zip 'https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/download/Win32-latest/dinput8-Win32.zip' 'dinput8-Win32.zip'
+          $d = Expand-Zip $z 'ual'
+          $loader = Get-ChildItem $d -Recurse -File -Filter 'dinput8.dll' | Select-Object -First 1
+          if (-not $loader) { throw 'ASI Loader not found' }
           Copy-Item $loader.FullName (Join-Path $root 'dinput8.dll') -Force
 
-          # Mod Loader v0.3.10. Keeps map/content fixes isolated from the base game.
-          $mlZip = Download-Zip 'https://github.com/thelink2012/modloader/releases/download/v0.3.10/modloader.zip' 'modloader.zip'
-          $ml = Expand-Zip $mlZip 'modloaderpkg'
-          $mlAsi = Get-ChildItem $ml -Recurse -File -Filter 'modloader.asi' | Select-Object -First 1
-          if (-not $mlAsi) { throw 'modloader.asi was not found.' }
-          Copy-SiblingTree $mlAsi $scripts
+          # Mod Loader v0.3.10
+          $z = Download-Zip 'https://github.com/thelink2012/modloader/releases/download/v0.3.10/modloader.zip' 'modloader.zip'
+          $d = Expand-Zip $z 'modloaderpkg'
+          $marker = Get-ChildItem $d -Recurse -File -Filter 'modloader.asi' | Select-Object -First 1
+          if (-not $marker) { throw 'modloader.asi not found' }
+          Copy-SiblingTree $marker $scripts
           New-Item -ItemType Directory -Force -Path (Join-Path $scripts 'modloader') | Out-Null
 
-          # ------------------------------------------------------------------
-          # PS2-focused graphics / map presentation. NO Xbox pipeline/content.
-          # ------------------------------------------------------------------
-
-          # SkyGfx v4.2b official release. Force PS2 building/vehicle pipelines when
-          # the shipped INI exposes those keys. We intentionally never select Xbox.
-          $skyZip = Download-Zip 'https://github.com/aap/skygfx/releases/download/v4.2b/SkyGfx_SA_4.2b.zip' 'SkyGfx_SA_4.2b.zip'
-          $sky = Expand-Zip $skyZip 'skygfxpkg'
-          $skyAsi = Get-ChildItem $sky -Recurse -File | Where-Object { $_.Name -ieq 'skygfx.asi' } | Select-Object -First 1
-          if (-not $skyAsi) { throw 'SkyGfx ASI was not found.' }
-          Copy-SiblingTree $skyAsi $scripts
+          # SkyGfx v4.2b - PS2 only, never Xbox pipeline
+          $z = Download-Zip 'https://github.com/aap/skygfx/releases/download/v4.2b/SkyGfx_SA_4.2b.zip' 'SkyGfx_SA_4.2b.zip'
+          $d = Expand-Zip $z 'skygfxpkg'
+          $marker = Get-ChildItem $d -Recurse -File | Where-Object { $_.Name -ieq 'skygfx.asi' } | Select-Object -First 1
+          if (-not $marker) { throw 'SkyGfx ASI not found' }
+          Copy-SiblingTree $marker $scripts
           Get-ChildItem $scripts -File -Filter '*.ini' | Where-Object { $_.Name -like 'skygfx*.ini' } | ForEach-Object {
-            $t = Get-Content $_.FullName -Raw
-            if ($t -match '(?im)^\s*buildingPipe\s*=') {
-              $t = [regex]::Replace($t, '(?im)^\s*buildingPipe\s*=.*$', 'buildingPipe=PS2')
-            }
-            if ($t -match '(?im)^\s*vehiclePipe\s*=') {
-              $t = [regex]::Replace($t, '(?im)^\s*vehiclePipe\s*=.*$', 'vehiclePipe=PS2')
-            }
-            Set-Content $_.FullName $t -Encoding ASCII
+            $x = Get-Content $_.FullName -Raw
+            if ($x -match '(?im)^\s*buildingPipe\s*=') { $x = [regex]::Replace($x,'(?im)^\s*buildingPipe\s*=.*$','buildingPipe=PS2') }
+            if ($x -match '(?im)^\s*vehiclePipe\s*=') { $x = [regex]::Replace($x,'(?im)^\s*vehiclePipe\s*=.*$','vehiclePipe=PS2') }
+            Set-Content $_.FullName $x -Encoding ASCII
           }
 
-          # Project2DFX (official GTASA release). Keep its defaults; aggressive draw
-          # distance modifications are deliberately not forced by this pack.
-          $p2Zip = Download-Zip 'https://github.com/ThirteenAG/III.VC.SA.IV.Project2DFX/releases/download/gtasa/SA.Project2DFX.zip' 'SA.Project2DFX.zip'
-          $p2 = Expand-Zip $p2Zip 'project2dfx'
-          $p2Asi = Get-ChildItem $p2 -Recurse -File | Where-Object { $_.Name -ieq 'SA.Project2DFX.asi' } | Select-Object -First 1
-          if (-not $p2Asi) { throw 'SA.Project2DFX.asi was not found.' }
-          Copy-SiblingTree $p2Asi $scripts
+          # Project2DFX official GTASA release. Its binary is commonly named SA_LodLights.asi;
+          # use SALodLights.ini as a reliable marker if the ASI name changes.
+          $z = Download-Zip 'https://github.com/ThirteenAG/III.VC.SA.IV.Project2DFX/releases/download/gtasa/SA.Project2DFX.zip' 'SA.Project2DFX.zip'
+          $d = Expand-Zip $z 'project2dfx'
+          $marker = Get-ChildItem $d -Recurse -File | Where-Object {
+            $_.Name -ieq 'SALodLights.ini' -or $_.Name -like '*LodLights*.asi' -or $_.Name -like '*Project2DFX*.asi'
+          } | Select-Object -First 1
+          if (-not $marker) {
+            Get-ChildItem $d -Recurse -File | Select-Object FullName,Length | Format-Table -AutoSize
+            throw 'Project2DFX marker not found'
+          }
+          Copy-SiblingTree $marker $scripts
 
-          # Open Limit Adjuster v1.7.0. Copy after Project2DFX so the current standalone
-          # version wins over any older bundled copy.
-          $olaZip = Download-Zip 'https://github.com/GTAmodding/III.VC.SA.LimitAdjuster/releases/download/v1.7.0/III.VC.SA.LimitAdjuster.zip' 'III.VC.SA.LimitAdjuster.zip'
-          $ola = Expand-Zip $olaZip 'olapkg'
-          $olaAsi = Get-ChildItem $ola -Recurse -File | Where-Object { $_.Name -ieq 'III.VC.SA.LimitAdjuster.asi' } | Select-Object -First 1
-          if (-not $olaAsi) { throw 'Open Limit Adjuster ASI was not found.' }
-          Copy-SiblingTree $olaAsi $scripts
+          # Open Limit Adjuster v1.7.0, copied last so it replaces any older copy bundled with 2DFX.
+          $z = Download-Zip 'https://github.com/GTAmodding/III.VC.SA.LimitAdjuster/releases/download/v1.7.0/III.VC.SA.LimitAdjuster.zip' 'III.VC.SA.LimitAdjuster.zip'
+          $d = Expand-Zip $z 'olapkg'
+          $marker = Get-ChildItem $d -Recurse -File | Where-Object { $_.Name -like '*LimitAdjuster*.asi' } | Select-Object -First 1
+          if (-not $marker) { throw 'Open Limit Adjuster ASI not found' }
+          Copy-SiblingTree $marker $scripts
 
-          # ------------------------------------------------------------------
-          # High-FPS gameplay corrections
-          # ------------------------------------------------------------------
-
-          # Framerate Vigilante SA prebuilt. Source project is MIT licensed; binary
-          # mirror is kept from the previous known-working FixAll build.
+          # Framerate Vigilante: stable 60 FPS / 180 Hz default + optional 180 FPS preset.
           Invoke-WebRequest -UseBasicParsing -Uri 'https://files.adv-rp.com/static/resources/advlauncher2/data/GTA/scripts/FramerateVigilante.SA.asi' -OutFile (Join-Path $scripts 'FramerateVigilante.SA.asi')
-
           @'
           [Settings]
           FPSlimit = 60
           RefreshRate = 180
           AutoLimitFPS = 1
-          '@ | Set-Content -Path (Join-Path $scripts 'FramerateVigilante.ini') -Encoding ASCII
-
+          '@ | Set-Content (Join-Path $scripts 'FramerateVigilante.ini') -Encoding ASCII
           @'
           [Settings]
           FPSlimit = 180
           RefreshRate = 180
           AutoLimitFPS = 1
-          '@ | Set-Content -Path (Join-Path $presets 'FramerateVigilante.ini') -Encoding ASCII
-
-          # Explicit guide status so it is clear what we intentionally excluded.
-          @'
-          STEAM "IMPROVED CLASSIC" REHBERI - BU PAKETTE DURUM
-          ===================================================
-
-          AKTIF / DAHIL
-          - SilentPatch SA Build 34.1
-          - Ultimate ASI Loader
-          - Mod Loader v0.3.10
-          - GTASA Widescreen Fix
-          - Framerate Vigilante
-          - Open Limit Adjuster v1.7.0
-          - SkyGfx v4.2b (PS2 pipeline; Xbox pipeline secilmez)
-          - SA.Project2DFX
-
-          BILEREK DAHIL EDILMEDI
-          - Xbox Map Features: kullanici istegi geregi tamamen disarida.
-          - Proper Fixes: guncel paket Xbox Map Features dahil birden fazla harita paketini
-            birlestiriyor; ayrica gelistiricileri reupload yapilmamasini tercih ediyor.
-          - GInput: gamepad/XInput odakli; klavye-fare FixAll cekirdegi icin gerekli degil.
-          - NoDEP: modern Windows'ta guvenlik ozelligini kapatmak yerine uyumlu ASI modlari kullaniliyor.
-          - CLEO/CLEO+: bu pakette aktif bir CLEO scripti olmadigi icin gereksiz runtime eklenmedi.
-          - MixSets: yuzlerce gameplay/engine ayari degistirebildigi icin vanilla-fix odakli cekirdekte aktif degil.
-          - 4K Loadscreens / Atmosphere Interface: kozmetik, bugfix degil.
-
-          HARITA MODLARI HAKKINDA
-          SilentPatch tam PS2 Map + Fixes paketi DEGILDIR. Bazi PS2 davranislarini ve gorsel
-          hatalari kod seviyesinde duzeltir. PS2 Map + Fixes ise IPL/IDE/COL tabanli harita
-          degisiklikleridir. Rehberdeki eski harita/texture paketlerinin buyuk kismi bugun
-          Proper Fixes gibi paketlerde birlesmis durumda; Xbox icerigini ayiklamadan Proper Fixes'i
-          topluca eklemek bu paketin "Xbox yok" hedefine aykiri olur.
-
-          Bu surum bu nedenle once stabil, geri alinabilir ASI/ModLoader altyapisini kurar.
-          Harita asset paketleri daha sonra scripts\modloader altinda ayri mod klasorleri olarak
-          eklenebilir; ana gta3.img/data dosyalari elle ezilmez.
-          '@ | Set-Content -Path (Join-Path $root 'GUIDE_MOD_STATUS_TR.txt') -Encoding UTF8
+          '@ | Set-Content (Join-Path $presets 'FramerateVigilante.ini') -Encoding ASCII
 
           @'
           GTA SAN ANDREAS - FIXALL ASI + PS2 CORE v2 (1.0 US)
           ====================================================
+          gta-reversed ve gta_sa.exe dahil degildir.
 
-          Bu paket gta-reversed kullanmaz ve gta_sa.exe icermez.
-          Hedef: klasik GTA San Andreas PC 1.0 US, modern Windows, vanilla+ bugfix ve PS2'ye
-          daha yakin sunum. Xbox'a ozel harita/grafik icerigi eklenmemistir.
-
-          DAHIL OLANLAR
-          - SilentPatchSA Build 34.1 (2026 Hotfix #1)
+          DAHIL:
+          - SilentPatch SA Build 34.1
           - Ultimate ASI Loader x86
           - Mod Loader v0.3.10
-          - GTASA Widescreen Fix
-          - Framerate Vigilante SA
+          - Widescreen Fix
+          - Framerate Vigilante
           - Open Limit Adjuster v1.7.0
-          - SkyGfx v4.2b, PS2 pipeline
-          - SA.Project2DFX
+          - SkyGfx v4.2b (PS2 building/vehicle pipeline; Xbox secilmez)
+          - Project2DFX
 
-          FPS / HZ
-          - Varsayilan oyun limiti: 60 FPS
-          - Monitor hedefi: 180 Hz
-          - Framerate Vigilante AutoLimitFPS: acik
-          - 180 FPS icin PRESETS\180FPS-EXPERIMENTAL\FramerateVigilante.ini dosyasini
-            scripts\FramerateVigilante.ini uzerine kopyala.
-          - 180 FPS deneysel kalir; bazi gorevler ve fizik davranislari 60 FPS'te daha guvenlidir.
+          VARSAYILAN: 60 FPS oyun + 180 Hz monitor. 180 FPS preset PRESETS klasorundedir.
 
-          KURULUM
-          1. Temiz GTA SA 1.0 US klasorunun yedegini al.
-          2. Eski ayni modlarin/ASI loader'larin kopyalarini kaldir veya yedekle.
-          3. ZIP'in icindekileri gta_sa.exe'nin bulundugu ana klasore cikart.
-          4. Oyundaki Frame Limiter'i ACIK tut.
-          5. Windows/NVIDIA/AMD tarafinda monitoru 180 Hz sec.
+          Xbox Map Features eklenmedi. SilentPatch tam PS2 Map + Fixes degildir: SilentPatch
+          kod/engine hatalarini ve bazi PS2 davranislarini geri getirir; PS2 Map + Fixes ise
+          IPL/IDE/COL tabanli ayri bir harita modudur.
 
-          NOTLAR
-          - SilentPatch PS2 Map'in kendisi degildir.
-          - SkyGfx PS2 render/pipeline davranisini hedefler; Xbox pipeline secilmemistir.
-          - Project2DFX'in agresif draw-distance ayarlari zorlanmadi; varsayilan ayarlar korunur.
-          - Harita/content modlari Mod Loader ile izole edilmelidir.
-          - GUIDE_MOD_STATUS_TR.txt dosyasinda Steam rehberi ile karsilastirma vardir.
+          Proper Fixes bu ZIP'e konmadi: guncel Proper Fixes Xbox Map Features dahil farkli
+          harita paketlerinden parcalar iceriyor ve gelistiricileri reupload yapilmamasini tercih ediyor.
+          Boylece Xbox icerigini yanlislikla paketlemiyoruz ve guncelleme/reupload politikasina uyuyoruz.
 
-          DOSYA YERLESIMI
-          GTA San Andreas\
-            dinput8.dll
-            SilentPatchSA.asi
-            SilentPatchSA.ini
-            GUIDE_MOD_STATUS_TR.txt
-            scripts\
-              modloader.asi
-              modloader\
-              GTASA.WidescreenFix.asi/.ini
-              FramerateVigilante.SA.asi/.ini
-              SkyGfx...
-              SA.Project2DFX...
-              III.VC.SA.LimitAdjuster...
-            PRESETS\180FPS-EXPERIMENTAL\FramerateVigilante.ini
+          NoDEP guvenlik nedeniyle eklenmedi; CLEO aktif script olmadigi icin eklenmedi; MixSets
+          gameplay ayarlarini fazla genis degistirdigi icin cekirdege eklenmedi; kozmetik 4K loadscreen
+          ve Atmosphere UI de zorunlu bugfix olmadigi icin eklenmedi.
 
-          KAYNAKLAR
-          SilentPatch: https://github.com/CookiePLMonster/SilentPatch
-          Ultimate ASI Loader: https://github.com/ThirteenAG/Ultimate-ASI-Loader
-          Widescreen Fix: https://github.com/ThirteenAG/WidescreenFixesPack
-          Mod Loader: https://github.com/thelink2012/modloader
-          Open Limit Adjuster: https://github.com/GTAmodding/III.VC.SA.LimitAdjuster
-          SkyGfx: https://github.com/aap/skygfx
-          Project2DFX: https://github.com/ThirteenAG/III.VC.SA.IV.Project2DFX
-          Framerate Vigilante source: https://github.com/GTAmodding/FramerateVigilante
-          '@ | Set-Content -Path (Join-Path $root 'README_TR.txt') -Encoding UTF8
+          KURULUM: ZIP'i temiz GTA SA 1.0 US klasorunde gta_sa.exe'nin yanina cikart.
+          Oyun Frame Limiter'i acik kalsin. Eski ayni mod/loader kopyalarini once yedekle.
+          '@ | Set-Content (Join-Path $root 'README_TR.txt') -Encoding UTF8
 
-          # Audit manifest for executable/plugin payloads.
+          @'
+          STEAM IMPROVED CLASSIC REHBERI - SECIMLER
+          =========================================
+          DAHIL: SilentPatch, ASI Loader, Mod Loader, Widescreen Fix, Framerate Vigilante,
+          Open Limit Adjuster, SkyGfx (PS2), Project2DFX.
+
+          HARIC: Xbox Map Features ve Xbox render pipeline.
+          AYRI TUTULDU: Proper Fixes ve eski map/texture paketleri (Xbox karisimi/reupload ve
+          cakisma riski), GInput (gamepad opsiyonel), CLEO (aktif script yok), NoDEP, MixSets,
+          4K Loadscreens ve Atmosphere Interface.
+          '@ | Set-Content (Join-Path $root 'GUIDE_MOD_STATUS_TR.txt') -Encoding UTF8
+
           $manifest = @()
           Get-ChildItem $root -Recurse -File | Where-Object { $_.Extension -in @('.dll','.asi') } | ForEach-Object {
             $h = Get-FileHash $_.FullName -Algorithm SHA256
-            $manifest += ('{0}  {1}' -f $h.Hash.ToLowerInvariant(), $_.FullName.Substring($root.Length + 1))
+            $manifest += ('{0}  {1}' -f $h.Hash.ToLowerInvariant(),$_.FullName.Substring($root.Length + 1))
           }
-          $manifest | Sort-Object | Set-Content -Path (Join-Path $root 'SHA256SUMS.txt') -Encoding ASCII
-
+          $manifest | Sort-Object | Set-Content (Join-Path $root 'SHA256SUMS.txt') -Encoding ASCII
           Compress-Archive -Path (Join-Path $root '*') -DestinationPath (Join-Path $PWD 'GTA-SA-FixAll-ASI-PS2-v2-1.0US.zip') -CompressionLevel Optimal -Force
 
       - name: Show package contents
