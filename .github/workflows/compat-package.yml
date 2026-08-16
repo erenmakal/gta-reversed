@@ -1,0 +1,113 @@
+name: Compatibility Package
+
+on:
+  push:
+    branches:
+      - feat/silentpatch-compat-180hz
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CL: /MP
+  build: "${{ github.workspace }}/build"
+
+jobs:
+  package:
+    runs-on: windows-2025-vs2026
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup CMake using Conan
+        uses: ./.github/actions/setup-cmake
+        with:
+          os: windows-2025-vs2026
+          arch: x86
+          conf: Release
+          preset: Unity
+
+      - name: Build gta-reversed
+        shell: cmd
+        run: cmake --build build --config Release
+
+      - name: Create install overlay and fetch latest SilentPatchSA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pkg = Join-Path $env:GITHUB_WORKSPACE 'compat-package'
+          $scripts = Join-Path $pkg 'scripts'
+          New-Item -ItemType Directory -Force -Path $scripts | Out-Null
+
+          # gta-reversed is expected in GTA SA's scripts directory.
+          Copy-Item 'bin/Release/gta_reversed.asi' $scripts
+          if (Test-Path 'bin/Release/gta_reversed.pdb') {
+            Copy-Item 'bin/Release/gta_reversed.pdb' $scripts
+          }
+
+          # Use the loader/mouse-fix bundle shipped by gta-reversed itself.
+          Expand-Archive -Path 'contrib/plugins.zip' -DestinationPath $pkg -Force
+
+          # Find the newest official SilentPatch release that contains SilentPatchSA.zip.
+          $headers = @{ 'User-Agent' = 'gta-reversed-compat-package' }
+          $releases = Invoke-RestMethod -Headers $headers -Uri 'https://api.github.com/repos/CookiePLMonster/SilentPatch/releases?per_page=30'
+          $saRelease = $releases | Where-Object {
+            $_.assets | Where-Object { $_.name -eq 'SilentPatchSA.zip' }
+          } | Select-Object -First 1
+          if (-not $saRelease) {
+            throw 'Could not locate an official SilentPatchSA.zip release.'
+          }
+          $asset = $saRelease.assets | Where-Object { $_.name -eq 'SilentPatchSA.zip' } | Select-Object -First 1
+          $spZip = Join-Path $env:RUNNER_TEMP 'SilentPatchSA.zip'
+          Invoke-WebRequest -Headers $headers -Uri $asset.browser_download_url -OutFile $spZip
+          Expand-Archive -Path $spZip -DestinationPath $pkg -Force
+
+          # Keep SilentPatch configured for the desktop refresh rate (180 Hz on the target setup).
+          $ini = Get-ChildItem -Path $pkg -Filter 'SilentPatchSA.ini' -Recurse | Select-Object -First 1
+          if ($ini) {
+            $text = Get-Content $ini.FullName -Raw
+            if ($text -match '(?m)^UseDesktopRefreshRate=') {
+              $text = $text -replace '(?m)^UseDesktopRefreshRate=.*$', 'UseDesktopRefreshRate=1'
+            }
+            Set-Content -Path $ini.FullName -Value $text -Encoding ASCII
+          }
+
+          @"
+          GTA-REVERSED + SILENTPATCH 180 HZ COMPATIBILITY BUILD
+          ====================================================
+
+          Copy the CONTENTS of this folder into your GTA San Andreas root folder.
+
+          REQUIRED EXE:
+          - GTA SA Compact executable
+          - Exact size: 5,189,632 bytes
+
+          INCLUDED:
+          - gta_reversed.asi Release build (scripts folder)
+          - gta-reversed's tested ASI loader / mouse-fix bundle
+          - Latest official SilentPatchSA release available when this package was built
+
+          TARGET:
+          - Windows desktop refresh rate: 180 Hz
+          - gta-reversed frame cap: 180 FPS
+          - SilentPatch UseDesktopRefreshRate=1
+
+          IMPORTANT:
+          This package is a compatibility/testing build. gta-reversed replaces many original
+          game functions, so some binary patches from third-party ASI plugins can become
+          redundant or be bypassed. Start with only the files in this package when testing.
+
+          SilentPatch release used: $($saRelease.tag_name)
+          SilentPatch release date: $($saRelease.published_at)
+          gta-reversed commit: $env:GITHUB_SHA
+          "@ | Set-Content -Path (Join-Path $pkg 'README-180HZ.txt') -Encoding UTF8
+
+          Get-ChildItem -Path $pkg -Recurse | Select-Object FullName, Length
+
+      - name: Upload ready-to-install package
+        uses: actions/upload-artifact@v7
+        with:
+          name: gta-reversed-SilentPatch-180Hz-ready
+          path: compat-package
+          if-no-files-found: error
