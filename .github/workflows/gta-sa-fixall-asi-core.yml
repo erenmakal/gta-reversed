@@ -1,0 +1,175 @@
+name: GTA SA FixAll ASI Core
+
+on:
+  push:
+    branches:
+      - build/gta-sa-fixall-asi-core
+  workflow_dispatch:
+
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build ready-to-install FixAll package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $PWD 'out'
+          $scripts = Join-Path $root 'scripts'
+          $presets = Join-Path $root 'PRESETS\180FPS-EXPERIMENTAL'
+          $tmp = Join-Path $PWD 'downloads'
+          New-Item -ItemType Directory -Force -Path $root,$scripts,$presets,$tmp | Out-Null
+
+          # 1) Latest SilentPatch SA: Build 34.1 (2026 hotfix #1)
+          $spZip = Join-Path $tmp 'SilentPatchSA.zip'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/CookiePLMonster/SilentPatch/releases/download/1.1-BUILD34.1-SA/SilentPatchSA.zip' -OutFile $spZip
+          $sp = Join-Path $tmp 'silentpatch'
+          Expand-Archive -Path $spZip -DestinationPath $sp -Force
+          $spAsi = Get-ChildItem $sp -Recurse -File -Filter 'SilentPatchSA.asi' | Select-Object -First 1
+          $spIni = Get-ChildItem $sp -Recurse -File -Filter 'SilentPatchSA.ini' | Select-Object -First 1
+          if (-not $spAsi -or -not $spIni) { throw 'SilentPatchSA files were not found in official archive.' }
+          Copy-Item $spAsi.FullName (Join-Path $root 'SilentPatchSA.asi')
+          Copy-Item $spIni.FullName (Join-Path $root 'SilentPatchSA.ini')
+
+          # Ensure monitor refresh is used unless another plugin explicitly overrides it.
+          $spIniPath = Join-Path $root 'SilentPatchSA.ini'
+          $spText = Get-Content $spIniPath -Raw
+          if ($spText -match '(?m)^UseDesktopRefreshRate\s*=') {
+            $spText = [regex]::Replace($spText, '(?m)^UseDesktopRefreshRate\s*=.*$', 'UseDesktopRefreshRate=1')
+          } else {
+            $spText += "`r`nUseDesktopRefreshRate=1`r`n"
+          }
+          Set-Content -Path $spIniPath -Value $spText -Encoding ASCII
+
+          # 2) Current official GTASA Widescreen Fix release.
+          $wsZip = Join-Path $tmp 'GTASA.WidescreenFix.zip'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/ThirteenAG/WidescreenFixesPack/releases/download/gtasa/GTASA.WidescreenFix.zip' -OutFile $wsZip
+          $ws = Join-Path $tmp 'widescreen'
+          Expand-Archive -Path $wsZip -DestinationPath $ws -Force
+          $wsAsi = Get-ChildItem $ws -Recurse -File -Filter 'GTASA.WidescreenFix.asi' | Select-Object -First 1
+          $wsIni = Get-ChildItem $ws -Recurse -File -Filter 'GTASA.WidescreenFix.ini' | Select-Object -First 1
+          if (-not $wsAsi -or -not $wsIni) { throw 'GTASA Widescreen Fix files were not found in official archive.' }
+          Copy-Item $wsAsi.FullName (Join-Path $scripts 'GTASA.WidescreenFix.asi')
+          Copy-Item $wsIni.FullName (Join-Path $scripts 'GTASA.WidescreenFix.ini')
+
+          # Copy any companion folders/files shipped alongside the ASI, except loaders/executables.
+          $wsAsiDir = $wsAsi.Directory.FullName
+          Get-ChildItem $wsAsiDir -File | Where-Object { $_.Name -notin @('GTASA.WidescreenFix.asi','GTASA.WidescreenFix.ini','dinput8.dll') } | ForEach-Object {
+            Copy-Item $_.FullName $scripts -Force
+          }
+
+          # 3) Ultimate ASI Loader x86, delivered as dinput8.dll.
+          $ualZip = Join-Path $tmp 'dinput8-Win32.zip'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/download/Win32-latest/dinput8-Win32.zip' -OutFile $ualZip
+          $ual = Join-Path $tmp 'ual'
+          Expand-Archive -Path $ualZip -DestinationPath $ual -Force
+          $loader = Get-ChildItem $ual -Recurse -File -Filter 'dinput8.dll' | Select-Object -First 1
+          if (-not $loader) { throw 'Ultimate ASI Loader dinput8.dll was not found.' }
+          Copy-Item $loader.FullName (Join-Path $root 'dinput8.dll')
+
+          # 4) Framerate Vigilante SA prebuilt. Source project is MIT licensed; this is a public mirror of the SA binary.
+          #    We intentionally provide a conservative 60 FPS preset; 180 FPS is optional/experimental.
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://files.adv-rp.com/static/resources/advlauncher2/data/GTA/scripts/FramerateVigilante.SA.asi' -OutFile (Join-Path $scripts 'FramerateVigilante.SA.asi')
+
+          @'
+          [Settings]
+          FPSlimit = 60
+          RefreshRate = 180
+          AutoLimitFPS = 1
+          '@ | Set-Content -Path (Join-Path $scripts 'FramerateVigilante.ini') -Encoding ASCII
+
+          @'
+          [Settings]
+          FPSlimit = 180
+          RefreshRate = 180
+          AutoLimitFPS = 1
+          '@ | Set-Content -Path (Join-Path $presets 'FramerateVigilante.ini') -Encoding ASCII
+
+          @'
+          GTA SAN ANDREAS - FIXALL ASI CORE (1.0 US)
+          ===========================================
+
+          Bu paket gta-reversed kullanmaz. GTA'nin kendi EXE dosyasini icermez.
+          Hedef: GTA San Andreas klasik PC 1.0 US + modern Windows.
+
+          ICERIK
+          - SilentPatchSA 1.1 Build 34.1 (2026 Update Hotfix #1)
+          - Ultimate ASI Loader (x86 / dinput8.dll)
+          - GTASA Widescreen Fix
+          - Framerate Vigilante (SA)
+
+          VARSAYILAN AYAR
+          - Monitor hedefi: 180 Hz
+          - Oyun FPS limiti: 60 FPS
+          - AutoLimitFPS: Acik
+
+          NEDEN 60 FPS?
+          GTA SA'nin oyun mantigi 30 FPS donemine gore yazildi. Framerate Vigilante cok sayida FPS-bagli hatayi duzeltse de
+          100-180 FPS araliginda hala gorev/fizik davranis farklari kalabilir. Stabil paket bu nedenle 60 FPS'i varsayilan yapar.
+
+          180 FPS DENEYSEL
+          PRESETS\180FPS-EXPERIMENTAL\FramerateVigilante.ini dosyasini
+          scripts\FramerateVigilante.ini uzerine kopyala.
+          Bu mod deneysel kullanilir; bazi gorevlerde/fizikte sorun kalabilir.
+
+          KURULUM
+          1. Temiz GTA SA 1.0 US klasorunun yedegini al.
+          2. Eski/ayni isimli ASI loader ve ayni modlarin kopyalarini kaldir.
+          3. Bu ZIP'in icindekileri gta_sa.exe'nin bulundugu ana klasore cikart.
+          4. Oyundaki Frame Limiter ayarini ACIK tut.
+          5. Windows/NVIDIA/AMD tarafinda monitoru 180 Hz sec.
+
+          ONEMLI
+          - gta_reversed.asi bu paketle gelmez ve gerekmiyor.
+          - gta_sa.exe bu paketle gelmez. Kendi yasal oyun kurulumunu kullan.
+          - Ilk testte baska ASI/CLEO/modloader eklentilerini gecici olarak kaldirmak sorun tespitini kolaylastirir.
+          - dinput8.dll zaten varsa once yedekle; bu paket kendi ASI loader'ini koyar.
+
+          DOSYA YERLESIMI
+          GTA San Andreas\
+            dinput8.dll
+            SilentPatchSA.asi
+            SilentPatchSA.ini
+            scripts\
+              GTASA.WidescreenFix.asi
+              GTASA.WidescreenFix.ini
+              FramerateVigilante.SA.asi
+              FramerateVigilante.ini
+            PRESETS\180FPS-EXPERIMENTAL\FramerateVigilante.ini
+
+          KAYNAKLAR / LISANSLAR
+          SilentPatch: https://github.com/CookiePLMonster/SilentPatch (MIT)
+          Ultimate ASI Loader: https://github.com/ThirteenAG/Ultimate-ASI-Loader (MIT)
+          Widescreen Fixes Pack: https://github.com/ThirteenAG/WidescreenFixesPack (MIT)
+          Framerate Vigilante source: https://github.com/GTAmodding/FramerateVigilante (MIT)
+          Framerate Vigilante binary mirror used by this build:
+          https://files.adv-rp.com/static/resources/advlauncher2/data/GTA/scripts/FramerateVigilante.SA.asi
+          '@ | Set-Content -Path (Join-Path $root 'README_TR.txt') -Encoding UTF8
+
+          # Build an auditable manifest of every executable/plugin in the package.
+          $manifest = @()
+          Get-ChildItem $root -Recurse -File | Where-Object { $_.Extension -in @('.dll','.asi') } | ForEach-Object {
+            $h = Get-FileHash $_.FullName -Algorithm SHA256
+            $manifest += ('{0}  {1}' -f $h.Hash.ToLowerInvariant(), $_.FullName.Substring($root.Length + 1))
+          }
+          $manifest | Set-Content -Path (Join-Path $root 'SHA256SUMS.txt') -Encoding ASCII
+
+          Compress-Archive -Path (Join-Path $root '*') -DestinationPath (Join-Path $PWD 'GTA-SA-FixAll-ASI-Core-1.0US.zip') -CompressionLevel Optimal -Force
+
+      - name: Show package contents
+        shell: pwsh
+        run: |
+          Get-ChildItem out -Recurse -File | Select-Object FullName,Length
+          Get-Content out\SHA256SUMS.txt
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: GTA-SA-FixAll-ASI-Core-1.0US
+          path: GTA-SA-FixAll-ASI-Core-1.0US.zip
+          if-no-files-found: error
+          retention-days: 30
