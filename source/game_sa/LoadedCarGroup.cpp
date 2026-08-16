@@ -46,13 +46,12 @@ eModelID CLoadedCarGroup::PickRandomCar(bool bNotTooManyInTheWorld, bool bOnlyPi
         return MODEL_INVALID;
     }
 
-    // NOTSA: Modern PCs can comfortably keep more civilian variety around than the
-    // minimum used by the original streaming heuristics. The total vehicle streaming
-    // budget is left untouched; we merely ask the existing streamer for another
-    // zone-appropriate model when the civilian pool gets too small.
+    // NOTSA: Keep a small baseline of zone-appropriate civilian vehicle models
+    // available. The total vehicle streaming budget remains unchanged; this only
+    // asks the existing streamer to improve the composition of that budget.
     //
-    // Use milliseconds instead of a frame counter so this behaves identically at
-    // 30, 60 and 180 FPS.
+    // Use milliseconds instead of a frame counter so the cadence stays stable at
+    // 30, 60, 120, 144 and 180+ FPS.
     if (   bNotTooManyInTheWorld
         && bOnlyPickNormalCars
         && this == &CPopulation::m_AppropriateLoadedCars
