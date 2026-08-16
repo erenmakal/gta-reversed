@@ -10,8 +10,12 @@
 #define APP_DEFAULT_WIDTH           800
 #define APP_DEFAULT_HEIGHT          600
 
-#define APP_MAX_FPS                 30
-#define GAME_LIMIT_FPS              30
+// High-refresh compatibility build.
+// GTA:SA's original 30 FPS cap is not appropriate for modern high-refresh displays.
+// Gameplay code still uses CTimer's variable timestep; frame-dependent edge cases are
+// handled separately instead of artificially running the renderer at 30 FPS.
+#define APP_MAX_FPS                 180
+#define GAME_LIMIT_FPS              180
 #define GAME_LEVEL_FILE             "DATA\\GTA.DAT"
 
 void AppInjectHooks();
@@ -29,7 +33,7 @@ static inline auto& gHorZ = StaticRef<float>(0xB72C6C);
 
 extern RsEventStatus AppEventHandler(RsEvent event, void* param);
 extern bool PluginAttach();
-extern bool Initialise3D(void* param);
+extern void Initialise3D(void* param);
 extern void Terminate3D();
 
 extern bool RwInitialize(void* param);
