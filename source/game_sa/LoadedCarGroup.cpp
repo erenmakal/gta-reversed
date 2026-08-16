@@ -51,38 +51,81 @@ eModelID CLoadedCarGroup::PickRandomCar(bool bNotTooManyInTheWorld, bool bOnlyPi
             return MODEL_INVALID;
         }
 
-        const auto weightSum = notsa::accumulate(choices, 0, [](int16 model) {
-            return CModelInfo::GetVehicleModelInfo(model)->m_nFrq;
-        });
+        // Vanilla only rejects a model after it has already been randomly selected
+        // when there are more than two references to it. This still strongly favours
+        // high-frequency models and is one of the reasons several identical cars can
+        // appear together even while other suitable models are already loaded.
+        //
+        // Keep the original frequency weighting, but when the caller explicitly asks
+        // for a model that isn't overrepresented, select from the least-referenced
+        // eligible models first. This improves visible traffic variety without changing
+        // CLoadedCarGroup's fixed ABI/layout or the streaming memory budget.
+        int32 leastRefCount = std::numeric_limits<int32>::max();
 
-        for (auto tr{ 0 }; tr < 10; tr++) { // tr = tries
-            // First, pick a model
-            const auto pickedModel = [&] {
-                auto pickedWeight = CGeneral::GetRandomNumberInRange(0, weightSum);
-                for (auto modelId : choices) {
-                    const auto thisModelFrq = CModelInfo::GetVehicleModelInfo(modelId)->m_nFrq;
-                    if (thisModelFrq >= pickedWeight) {
-                        return (eModelID)(modelId);
-                    }
-                    pickedWeight -= thisModelFrq;
+        const auto IsBaseSuitable = [](eModelID model) {
+            return !CTheScripts::HasCarModelBeenSuppressed(model)
+                && !CTheScripts::HasVehicleModelBeenBlockedByScript(model)
+                && !CStreaming::WeAreTryingToPhaseVehicleOut(model);
+        };
+
+        if (bNotTooManyInTheWorld) {
+            for (const auto modelId : choices) {
+                const auto model = (eModelID)(modelId);
+                if (!IsBaseSuitable(model)) {
+                    continue;
                 }
-                // No frequency of any model in the array was `>=` than `pickedWeight`
-                // Originally in this case the last value from `choices` was used, but most likely unintentionally
-                NOTSA_UNREACHABLE();
-            }();
 
-            // Check if it's suitable
-            if (   !CTheScripts::HasCarModelBeenSuppressed(pickedModel)
-                && !CTheScripts::HasVehicleModelBeenBlockedByScript(pickedModel)
-                && !CStreaming::WeAreTryingToPhaseVehicleOut(pickedModel)
-                && (!bNotTooManyInTheWorld || CModelInfo::GetVehicleModelInfo(pickedModel)->m_nRefCount <= 2)
-            ) {
-                return pickedModel;
+                const auto refCount = (int32)(CModelInfo::GetVehicleModelInfo(model)->m_nRefCount);
+                if (refCount <= 2) {
+                    leastRefCount = std::min(leastRefCount, refCount);
+                }
+            }
+
+            if (leastRefCount == std::numeric_limits<int32>::max()) {
+                return MODEL_INVALID;
             }
         }
 
-        // 10 tries, but no luck
-        return MODEL_INVALID;
+        const auto IsSuitable = [&](eModelID model) {
+            if (!IsBaseSuitable(model)) {
+                return false;
+            }
+
+            return !bNotTooManyInTheWorld
+                || (int32)(CModelInfo::GetVehicleModelInfo(model)->m_nRefCount) == leastRefCount;
+        };
+
+        const auto weightSum = notsa::accumulate(choices, 0, [&](int16 modelId) {
+            const auto model = (eModelID)(modelId);
+            return IsSuitable(model)
+                ? CModelInfo::GetVehicleModelInfo(model)->m_nFrq
+                : 0;
+        });
+
+        if (weightSum <= 0) {
+            return MODEL_INVALID;
+        }
+
+        auto pickedWeight = CGeneral::GetRandomNumberInRange(0, weightSum);
+        eModelID lastSuitable = MODEL_INVALID;
+
+        for (const auto modelId : choices) {
+            const auto model = (eModelID)(modelId);
+            if (!IsSuitable(model)) {
+                continue;
+            }
+
+            lastSuitable = model;
+            const auto thisModelFrq = CModelInfo::GetVehicleModelInfo(model)->m_nFrq;
+            if (thisModelFrq >= pickedWeight) {
+                return model;
+            }
+            pickedWeight -= thisModelFrq;
+        }
+
+        // Protect against rounding/range-edge differences while preserving a valid
+        // weighted choice. Under normal circumstances the loop returns earlier.
+        return lastSuitable;
     };
 
     if (bOnlyPickNormalCars) {
