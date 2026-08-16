@@ -46,6 +46,26 @@ eModelID CLoadedCarGroup::PickRandomCar(bool bNotTooManyInTheWorld, bool bOnlyPi
         return MODEL_INVALID;
     }
 
+    // NOTSA: Modern PCs can comfortably keep more civilian variety around than the
+    // minimum used by the original streaming heuristics. The total vehicle streaming
+    // budget is left untouched; we merely ask the existing streamer for another
+    // zone-appropriate model when the civilian pool gets too small.
+    //
+    // Use milliseconds instead of a frame counter so this behaves identically at
+    // 30, 60 and 180 FPS.
+    if (   bNotTooManyInTheWorld
+        && bOnlyPickNormalCars
+        && this == &CPopulation::m_AppropriateLoadedCars
+        && CountMembers() < 6
+    ) {
+        static uint32 sLastTrafficVarietyRequestMs{};
+        const auto now = CTimer::GetTimeInMS();
+        if (now - sLastTrafficVarietyRequestMs >= 1000) {
+            CStreaming::StreamOneNewCar();
+            sLastTrafficVarietyRequestMs = now;
+        }
+    }
+
     const auto PickRandom = [&](auto&& choices) {
         if (rng::empty(choices)) {
             return MODEL_INVALID;
