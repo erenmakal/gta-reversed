@@ -116,10 +116,9 @@ eModelID CLoadedCarGroup::PickRandomCar(bool bNotTooManyInTheWorld, bool bOnlyPi
 
         const auto weightSum = notsa::accumulate(choices, 0, [&](int16 modelId) {
             const auto model = (eModelID)(modelId);
-            if (!IsSuitable(model)) {
-                return 0;
-            }
-            return std::max(1, (int32)(CModelInfo::GetVehicleModelInfo(model)->m_nFrq));
+            return IsSuitable(model)
+                ? CModelInfo::GetVehicleModelInfo(model)->m_nFrq
+                : 0;
         });
 
         if (weightSum <= 0) {
@@ -136,7 +135,7 @@ eModelID CLoadedCarGroup::PickRandomCar(bool bNotTooManyInTheWorld, bool bOnlyPi
             }
 
             lastSuitable = model;
-            const auto thisModelFrq = std::max(1, (int32)(CModelInfo::GetVehicleModelInfo(model)->m_nFrq));
+            const auto thisModelFrq = CModelInfo::GetVehicleModelInfo(model)->m_nFrq;
             if (thisModelFrq >= pickedWeight) {
                 return model;
             }
