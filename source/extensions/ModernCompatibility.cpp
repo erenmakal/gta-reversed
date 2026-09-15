@@ -8,9 +8,18 @@ namespace notsa::modern {
 namespace {
     bool g_TimerPeriodRaised{};
     bool g_CursorClipped{};
+    uint32 g_NextTrafficDiversityRefreshMs{};
+
+    constexpr uint32 MAX_SAFE_VEHICLE_MODEL_BUDGET = 22;
 
     uint32 SanitizeFrameRate(int32 fps) {
         return static_cast<uint32>(std::clamp(fps, 30, 1000));
+    }
+
+    uint32 SanitizeVehicleModelBudget(int32 budget) {
+        // CLoadedCarGroup owns 23 slots. The stock PC streamer uses 22 so one
+        // slot remains available while a model is phased out/replaced.
+        return static_cast<uint32>(std::clamp(budget, 8, static_cast<int32>(MAX_SAFE_VEHICLE_MODEL_BUDGET)));
     }
 
     void EnablePerMonitorDpiAwareness() {
@@ -85,6 +94,49 @@ namespace {
             g_CursorClipped = true;
         }
     }
+
+    void ServiceTrafficDiversity() {
+        if (!g_ModernCompatibilityConfig.EnableExpandedTrafficDiversity || !CStreaming::ms_bIsInitialised) {
+            return;
+        }
+
+        // stream.ini may lower this value again after CStreaming::Init2(). Keep
+        // the modern PC policy authoritative so the old PS2-era pressure does not
+        // reduce the active vehicle model set back to a tiny number.
+        const auto vehicleBudget = SanitizeVehicleModelBudget(g_ModernCompatibilityConfig.TrafficVehicleModelBudget);
+        CStreaming::desiredNumVehiclesLoaded = vehicleBudget;
+
+        if (CTimer::GetIsPaused() || !CPopCycle::m_pCurrZoneInfo) {
+            return;
+        }
+
+        const auto minimumCivilianModels = static_cast<uint32>(std::clamp(
+            g_ModernCompatibilityConfig.MinimumCivilianTrafficModels,
+            3,
+            static_cast<int32>(vehicleBudget)
+        ));
+
+        if (CPopulation::m_AppropriateLoadedCars.CountMembers() >= minimumCivilianModels) {
+            return;
+        }
+
+        const auto now = CTimer::GetTimeInMS();
+        if (g_NextTrafficDiversityRefreshMs != 0 && static_cast<int32>(now - g_NextTrafficDiversityRefreshMs) < 0) {
+            return;
+        }
+
+        // Unlike the original emergency/mission-pressure behaviour, actively
+        // replenish a normal zone-appropriate model. The normal CStreaming load
+        // path still owns eviction and respects mission/game-required models.
+        CStreaming::StreamOneNewCar();
+
+        const auto refreshMs = static_cast<uint32>(std::clamp(
+            g_ModernCompatibilityConfig.TrafficDiversityRefreshMs,
+            250,
+            10000
+        ));
+        g_NextTrafficDiversityRefreshMs = now + refreshMs;
+    }
 }
 
 uint32 GetDesktopRefreshRate() {
@@ -127,10 +179,12 @@ void Service() {
     // left untouched; high-FPS fixes must be time-step based instead.
     RsGlobal.frameLimit = static_cast<int32>(GetTargetFrameRate());
     ServiceCursorClip();
+    ServiceTrafficDiversity();
 }
 
 void Shutdown() {
     ReleaseCursorClip();
+    g_NextTrafficDiversityRefreshMs = 0;
 
     if (g_TimerPeriodRaised) {
         timeEndPeriod(1);
