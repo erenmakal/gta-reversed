@@ -2,6 +2,7 @@
 
 namespace notsa::modern {
     void Initialise();
+    void Service();
     void Shutdown();
 
     uint32 GetDesktopRefreshRate();
