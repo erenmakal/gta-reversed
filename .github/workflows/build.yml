@@ -103,17 +103,21 @@ jobs:
                   @'
                   GTA San Andreas - gta-reversed Modern Compatibility
 
-                  Install:
+                  Recommended install:
                   1. Use the GTA San Andreas 1.0 US Compact executable expected by gta-reversed.
-                  2. Install a compatible ASI loader (Silent's ASI Loader / Ultimate ASI Loader).
-                  3. Copy the contents of this package to the GTA San Andreas directory.
+                  2. Copy this package to the GTA San Andreas directory.
+                  3. From that directory run:
+                     powershell -ExecutionPolicy Bypass -File .\Install-ModernSA.ps1 -GamePath .
+
+                  The installer verifies and installs the pinned x86 Ultimate ASI Loader and official
+                  SilentPatchSA Build 34.1. gta_reversed.asi is already supplied by this package.
 
                   Included:
                   - gta_reversed.asi: source-level reverse-engineered engine fixes and high-refresh work.
                   - SilentPatchSA Build 34.1: official fallback/coverage for SilentPatch fixes not yet source-ported.
-                  - Install-ModernSA.ps1: verified installer/downloader for SilentPatch and optional PS2/map-content assets.
+                  - Install-ModernSA.ps1: SHA-256 verified installer/downloader.
 
-                  Optional verified map-content download:
+                  Optional verified PS2/map-content download:
                     powershell -ExecutionPolicy Bypass -File .\Install-ModernSA.ps1 -GamePath . -DownloadMapContent
 
                   IMPORTANT:
