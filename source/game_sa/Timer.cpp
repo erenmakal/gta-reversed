@@ -8,6 +8,28 @@
 
 #include "oswrapper.h"
 
+namespace {
+// GTA stores its public timers as integer milliseconds. At high refresh rates a
+// frame may be shorter than 1 ms; truncating every frame makes game timers stop
+// advancing. Keep the fractional part between frames and only commit whole
+// milliseconds to the original globals. This mirrors the timing correction
+// used by SilentPatch while keeping gta-reversed's native CTimer implementation.
+double g_TimeRemainderNonClippedMs{};
+double g_TimeRemainderClippedMs{};
+double g_TimeRemainderPauseModeMs{};
+
+uint32 AccumulateWholeMilliseconds(double deltaMs, double& remainder) {
+    double whole{};
+    remainder = std::modf(deltaMs + remainder, &whole);
+    return static_cast<uint32>(whole);
+}
+
+void ResetTimerRemainders() {
+    g_TimeRemainderNonClippedMs = 0.0;
+    g_TimeRemainderClippedMs = 0.0;
+    g_TimeRemainderPauseModeMs = 0.0;
+}
+} // namespace
 
 void CTimer::InjectHooks()
 {
@@ -64,6 +86,8 @@ void CTimer::Initialise()
     ms_fTimeStep = 1.0f;
     ms_fOldTimeStep = 1.0f;
 
+    ResetTimerRemainders();
+
     TimerFunction_t timerFunc;
     auto frequency = GetOSWPerformanceFrequency();
     if (frequency) {
@@ -112,6 +136,7 @@ void CTimer::Stop()
     m_snPreviousTimeInMilliseconds = m_snTimeInMilliseconds;
     m_sbEnableTimeDebug = false;
     m_snPreviousTimeInMillisecondsNonClipped = m_snTimeInMillisecondsNonClipped;
+    ResetTimerRemainders();
 }
 
 // 0x561AF0
@@ -142,8 +167,11 @@ uint32 CTimer::GetCyclesPerFrame()
 // 0x561A80
 uint32 CTimer::GetCurrentTimeInCycles()
 {
-    // TODO: Make it use 64-bit timestamps.
-    return (uint32)(GetOSWPerformanceTime() - m_snRenderStartTime);
+    // The public ABI is 32-bit, but calculation remains 64-bit until the final
+    // conversion. Frame pacing no longer relies on this value for long-running
+    // high-refresh sessions.
+    const uint64 now = ms_fnTimerFunction ? ms_fnTimerFunction() : GetOSWPerformanceTime();
+    return static_cast<uint32>(now - m_snRenderStartTime);
 }
 
 // 0x561AD0
@@ -155,44 +183,24 @@ bool CTimer::GetIsSlowMotionActive()
 // 0x5618D0
 void CTimer::UpdateVariables(float timeElapsed)
 {
-    /* Izzotop: from IDA directly to here (tested)
-    float step = timeStep / float(m_snTimerDivider);
-    m_snTimeInMillisecondsNonClipped += (uint32)(step);
-    ms_fTimeStepNonClipped = step * 0.05f; // step / 20.0f;
+    // Keep the fractional millisecond component rather than truncating it every
+    // frame. This is important at 180 Hz and essential above 1000 FPS.
+    const double frameDeltaMs = double(timeElapsed) / double(m_snTimerDivider);
 
-    if (step > 300.f) {
-        step = 300.f;
-    }
-    m_snTimeInMilliseconds += (uint32)(step);
+    m_snTimeInMillisecondsNonClipped += AccumulateWholeMilliseconds(
+        frameDeltaMs,
+        g_TimeRemainderNonClippedMs
+    );
+    ms_fTimeStepNonClipped = float(frameDeltaMs / double(TIMESTEP_LEN_IN_MS));
 
-    if (ms_fTimeStepNonClipped < 0.01f &&
-        !GetIsPaused() &&
-        !CSpecialFX::bSnapShotActive
-    ) {
-        ms_fTimeStepNonClipped = 0.01f;
-    }
-
-    ms_fOldTimeStep = ms_fTimeStep;
-
-    if (ms_fTimeStepNonClipped > 3.0f) {
-        ms_fTimeStep = 3.0f;
-    } else if (ms_fTimeStepNonClipped > 0.00001f) {
-        ms_fTimeStep = ms_fTimeStepNonClipped;
-    } else {
-        ms_fTimeStep = 0.00001f;
-    }
-    */
-
-    // Pirulax: Shorter code, same functionality.
-    const float frameDelta = (float)timeElapsed / (float)m_snTimerDivider;
-    m_snTimeInMillisecondsNonClipped += (uint32)frameDelta;
-    ms_fTimeStepNonClipped = frameDelta / TIMESTEP_LEN_IN_MS;
-
-    m_snTimeInMilliseconds += (uint32)std::min<float>(frameDelta, 300.0f);
+    m_snTimeInMilliseconds += AccumulateWholeMilliseconds(
+        std::min(frameDeltaMs, 300.0),
+        g_TimeRemainderClippedMs
+    );
 
     if (!m_UserPause && !m_CodePause && !CSpecialFX::bSnapShotActive) {
-        // Make it be something at least, to avoid division by 0
-        ms_fTimeStepNonClipped = std::max(ms_fTimeStepNonClipped, 0.01f); 
+        // Make it be something at least, to avoid division by 0.
+        ms_fTimeStepNonClipped = std::max(ms_fTimeStepNonClipped, 0.01f);
     }
 
     ms_fOldTimeStep = ms_fTimeStep;
@@ -207,26 +215,34 @@ void CTimer::Update() {
         return;
 
     m_sbEnableTimeDebug = true;
-    game_FPS = float(1000.0f / float(m_snTimeInMillisecondsNonClipped - m_snPreviousTimeInMillisecondsNonClipped));
 
     // Update history
     m_snPPPPreviousTimeInMilliseconds = m_snPPPreviousTimeInMilliseconds;
     m_snPPPreviousTimeInMilliseconds = m_snPPreviousTimeInMilliseconds;
     m_snPPreviousTimeInMilliseconds = m_snPreviousTimeInMilliseconds;
     m_snPreviousTimeInMilliseconds = m_snTimeInMilliseconds;
-
     m_snPreviousTimeInMillisecondsNonClipped = m_snTimeInMillisecondsNonClipped;
 
     const uint64 nRenderTimeBefore = m_snRenderStartTime;
     m_snRenderStartTime = ms_fnTimerFunction();
-    auto fTimeDelta = float(m_snRenderStartTime - nRenderTimeBefore);
+
+    const uint64 rawDeltaTicks = m_snRenderStartTime - nRenderTimeBefore;
+    const double rawDeltaMs = double(rawDeltaTicks) / double(m_snTimerDivider);
+    game_FPS = rawDeltaMs > 0.0 ? float(1000.0 / rawDeltaMs) : 0.0f;
+
+    double timeDeltaTicks = double(rawDeltaTicks);
     if (!GetIsPaused())
-        fTimeDelta *= ms_fTimeScale;
+        timeDeltaTicks *= double(ms_fTimeScale);
 
-    m_snTimeInMillisecondsPauseMode += (uint32)(fTimeDelta / float(m_snTimerDivider));
+    const double pauseModeDeltaMs = timeDeltaTicks / double(m_snTimerDivider);
+    m_snTimeInMillisecondsPauseMode += AccumulateWholeMilliseconds(
+        pauseModeDeltaMs,
+        g_TimeRemainderPauseModeMs
+    );
+
     if (GetIsPaused())
-        fTimeDelta = 0.0f;
+        timeDeltaTicks = 0.0;
 
-    UpdateVariables(fTimeDelta);
+    UpdateVariables(float(timeDeltaTicks));
     m_FrameCounter++;
 }
