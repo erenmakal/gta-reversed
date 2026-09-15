@@ -2,10 +2,12 @@
 
 #include "ModernCompatibility.hpp"
 #include "extensions/Configs/ModernCompatibility.hpp"
+#include "WinPlatform.h"
 
 namespace notsa::modern {
 namespace {
     bool g_TimerPeriodRaised{};
+    bool g_CursorClipped{};
 
     uint32 SanitizeFrameRate(int32 fps) {
         return static_cast<uint32>(std::clamp(fps, 30, 1000));
@@ -36,6 +38,53 @@ namespace {
         // component configured DPI awareness before gta-reversed loaded).
         SetProcessDPIAware();
     }
+
+    void ReleaseCursorClip() {
+        if (g_CursorClipped) {
+            ClipCursor(nullptr);
+            g_CursorClipped = false;
+        }
+    }
+
+    void ServiceCursorClip() {
+        if (!g_ModernCompatibilityConfig.ConfineCursorToGameWindow || !RsGlobal.ps) {
+            ReleaseCursorClip();
+            return;
+        }
+
+        const auto hwnd = PSGLOBAL(window);
+        if (!hwnd || GetForegroundWindow() != hwnd || IsIconic(hwnd)) {
+            ReleaseCursorClip();
+            return;
+        }
+
+        RECT rect{};
+        if (!GetClientRect(hwnd, &rect)) {
+            ReleaseCursorClip();
+            return;
+        }
+
+        POINT topLeft{ rect.left, rect.top };
+        POINT bottomRight{ rect.right, rect.bottom };
+        if (!ClientToScreen(hwnd, &topLeft) || !ClientToScreen(hwnd, &bottomRight)) {
+            ReleaseCursorClip();
+            return;
+        }
+
+        RECT screenRect{
+            topLeft.x,
+            topLeft.y,
+            bottomRight.x,
+            bottomRight.y
+        };
+
+        // SilentPatch fixes the cursor escaping the game window on multi-monitor
+        // systems. Keep the same behaviour here at engine level, while always
+        // releasing the clip when the game loses focus so Alt+Tab stays normal.
+        if (ClipCursor(&screenRect)) {
+            g_CursorClipped = true;
+        }
+    }
 }
 
 uint32 GetDesktopRefreshRate() {
@@ -58,10 +107,9 @@ void Initialise() {
         g_TimerPeriodRaised = timeBeginPeriod(1) == TIMERR_NOERROR;
     }
 
-    // The stock PC game targets 30 FPS when its limiter is enabled. This branch
-    // deliberately targets 180 FPS by default. CTimer has been made fractional
-    // millisecond-safe so this does not speed up the simulation or freeze
-    // millisecond timers.
+    // RsInitialize writes APP_MAX_FPS later in startup. Service() re-applies the
+    // configurable value once the engine is alive, so this initial assignment is
+    // only an early default.
     RsGlobal.frameLimit = static_cast<int32>(GetTargetFrameRate());
 
     const auto desktopHz = GetDesktopRefreshRate();
@@ -73,7 +121,17 @@ void Initialise() {
     );
 }
 
+void Service() {
+    // Keep the render limiter configurable even though the original RsInitialize
+    // path rewrites it during startup. Gameplay's 30 Hz baseline is deliberately
+    // left untouched; high-FPS fixes must be time-step based instead.
+    RsGlobal.frameLimit = static_cast<int32>(GetTargetFrameRate());
+    ServiceCursorClip();
+}
+
 void Shutdown() {
+    ReleaseCursorClip();
+
     if (g_TimerPeriodRaised) {
         timeEndPeriod(1);
         g_TimerPeriodRaised = false;
