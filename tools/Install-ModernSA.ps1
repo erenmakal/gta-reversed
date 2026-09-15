@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$GamePath,
 
+    [switch]$InstallAsiLoader = $true,
     [switch]$InstallSilentPatch = $true,
     [switch]$DownloadMapContent,
     [switch]$Force
@@ -48,6 +49,29 @@ function Get-VerifiedFile {
     if ($actual -ne $expected) {
         Remove-Item $OutFile -Force -ErrorAction SilentlyContinue
         throw "SHA-256 mismatch for $OutFile. Expected $expected, got $actual"
+    }
+}
+
+if ($InstallAsiLoader) {
+    # Pinned x86 Ultimate ASI Loader release. GTA SA classic is a 32-bit process.
+    $loaderUrl = 'https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/download/v9.7.4/Ultimate-ASI-Loader-NoPDB.zip'
+    $loaderHash = '14b3a1ad018899571ac9aa01482977f3c6d49e6cba99f552d01c5acacd1315e1'
+    $loaderZip = Join-Path $DownloadPath 'Ultimate-ASI-Loader-v9.7.4-NoPDB.zip'
+    $loaderTemp = Join-Path $env:TEMP ('ModernSA-ASI-' + [Guid]::NewGuid().ToString('N'))
+
+    Get-VerifiedFile -Uri $loaderUrl -OutFile $loaderZip -Sha256 $loaderHash
+    New-Item -ItemType Directory -Force -Path $loaderTemp | Out-Null
+    try {
+        Expand-Archive -Path $loaderZip -DestinationPath $loaderTemp -Force
+        $loader = Get-ChildItem $loaderTemp -Recurse -File -Filter 'dinput8.dll' | Select-Object -First 1
+        if (-not $loader) {
+            throw 'dinput8.dll was not found in the pinned Ultimate ASI Loader archive.'
+        }
+        Copy-Item $loader.FullName (Join-Path $GamePath 'dinput8.dll') -Force
+        Write-Host 'Ultimate ASI Loader v9.7.4 x86 installed as dinput8.dll.' -ForegroundColor Green
+    }
+    finally {
+        Remove-Item $loaderTemp -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 
