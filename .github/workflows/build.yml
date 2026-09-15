@@ -48,7 +48,7 @@ jobs:
                   path: bin/${{ matrix.conf }}
 
     full-compat-package:
-        name: Full Compatibility Package
+        name: Modern SA Packages
         if: github.event_name == 'push'
         needs: build
         runs-on: windows-2025-vs2026
@@ -79,59 +79,88 @@ jobs:
                   New-Item -ItemType Directory -Force -Path staging/SilentPatch | Out-Null
                   Expand-Archive -Path $zip -DestinationPath staging/SilentPatch -Force
 
-            - name: Assemble install-ready package
+            - name: Assemble separated packages
               shell: pwsh
               run: |
                   $ErrorActionPreference = 'Stop'
-                  $pkg = 'package'
-                  $scripts = Join-Path $pkg 'scripts'
-                  New-Item -ItemType Directory -Force -Path $scripts | Out-Null
+
+                  $enginePkg = 'package-engine'
+                  $fallbackPkg = 'package-silentpatch'
+                  $fullPkg = 'package-full'
+                  $engineScripts = Join-Path $enginePkg 'scripts'
+                  $fallbackScripts = Join-Path $fallbackPkg 'scripts'
+                  $fullScripts = Join-Path $fullPkg 'scripts'
+                  New-Item -ItemType Directory -Force -Path $engineScripts, $fallbackScripts, $fullScripts | Out-Null
 
                   $asi = Get-ChildItem -Path staging/gta-reversed -Recurse -Filter 'gta_reversed.asi' | Select-Object -First 1
                   if (-not $asi) { throw 'gta_reversed.asi was not produced by the Release Unity build.' }
-                  Copy-Item $asi.FullName (Join-Path $scripts 'gta_reversed.asi')
 
-                  # SilentPatch supports loading from the game root or scripts depending on the ASI loader.
-                  # Keep its original file names/config so its self-detection and INI lookup remain intact.
-                  Get-ChildItem -Path staging/SilentPatch -Recurse -File | ForEach-Object {
-                      Copy-Item $_.FullName (Join-Path $scripts $_.Name) -Force
-                  }
-
-                  Copy-Item 'THIRD_PARTY/SilentPatch-LICENSE.txt' (Join-Path $pkg 'SilentPatch-LICENSE.txt')
-                  Copy-Item 'tools/Install-ModernSA.ps1' (Join-Path $pkg 'Install-ModernSA.ps1')
-
+                  # ENGINE package: only source-level gta-reversed modernization.
+                  Copy-Item $asi.FullName (Join-Path $engineScripts 'gta_reversed.asi')
+                  Copy-Item 'tools/Install-ModernSA.ps1' (Join-Path $enginePkg 'Install-ModernSA.ps1')
                   @'
-                  GTA San Andreas - gta-reversed Modern Compatibility
+                  GTA San Andreas - gta-reversed Engine Modernization
 
-                  Recommended install:
-                  1. Use the GTA San Andreas 1.0 US Compact executable expected by gta-reversed.
-                  2. Copy this package to the GTA San Andreas directory.
-                  3. From that directory run:
-                     powershell -ExecutionPolicy Bypass -File .\Install-ModernSA.ps1 -GamePath .
+                  This package contains only gta-reversed source-level engine work.
+                  SilentPatchSA is NOT bundled here.
 
-                  The installer verifies and installs the pinned x86 Ultimate ASI Loader and official
-                  SilentPatchSA Build 34.1. gta_reversed.asi is already supplied by this package.
+                  Source-level fixes live inside the reversed engine implementation
+                  (timer, high-refresh, Windows compatibility and future migrated fixes).
+                  gta-reversed itself is loaded as an ASI because that is the current
+                  project architecture, but these fixes are not external SilentPatch hooks.
+                  '@ | Set-Content -Path (Join-Path $enginePkg 'README-ENGINE.txt') -Encoding UTF8
 
-                  Included:
-                  - gta_reversed.asi: source-level reverse-engineered engine fixes and high-refresh work.
-                  - SilentPatchSA Build 34.1: official fallback/coverage for SilentPatch fixes not yet source-ported.
-                  - Install-ModernSA.ps1: SHA-256 verified installer/downloader.
+                  # SILENTPATCH package: official external fallback only.
+                  Get-ChildItem -Path staging/SilentPatch -Recurse -File | ForEach-Object {
+                      Copy-Item $_.FullName (Join-Path $fallbackScripts $_.Name) -Force
+                      Copy-Item $_.FullName (Join-Path $fullScripts $_.Name) -Force
+                  }
+                  Copy-Item 'THIRD_PARTY/SilentPatch-LICENSE.txt' (Join-Path $fallbackPkg 'SilentPatch-LICENSE.txt')
+                  Copy-Item 'THIRD_PARTY/SilentPatch-LICENSE.txt' (Join-Path $fullPkg 'SilentPatch-LICENSE.txt')
+                  @'
+                  GTA San Andreas - SilentPatch Fallback
+
+                  This package contains the official SilentPatch SA Build 34.1 fallback only.
+                  Use it for fixes that have not yet been migrated into gta-reversed engine code.
+                  As fixes are migrated natively, overlapping fallback patches should be disabled
+                  or removed to avoid double patching the same game behaviour.
+                  '@ | Set-Content -Path (Join-Path $fallbackPkg 'README-SILENTPATCH.txt') -Encoding UTF8
+
+                  # FULL package: engine + official fallback + verified installer.
+                  Copy-Item $asi.FullName (Join-Path $fullScripts 'gta_reversed.asi')
+                  Copy-Item 'tools/Install-ModernSA.ps1' (Join-Path $fullPkg 'Install-ModernSA.ps1')
+                  @'
+                  GTA San Andreas - Modern SA Full Compatibility
+
+                  One-command install from the GTA San Andreas directory:
+                    powershell -ExecutionPolicy Bypass -File .\Install-ModernSA.ps1 -GamePath .
 
                   Optional verified PS2/map-content download:
                     powershell -ExecutionPolicy Bypass -File .\Install-ModernSA.ps1 -GamePath . -DownloadMapContent
 
-                  IMPORTANT:
-                  Map/model/IDE/IPL corrections are data assets rather than SilentPatch engine patches. They are
-                  downloaded from the map project's own release and are not blindly merged into gta3.img because
-                  map packs can overlap and have additional ModLoader/limit-adjuster dependencies.
+                  Layers:
+                  1. gta_reversed.asi - source-level engine modernization.
+                  2. SilentPatchSA Build 34.1 - external fallback for not-yet-migrated fixes.
+                  3. Optional map/model/IDE/IPL content - separate asset layer.
 
-                  The source-level ports are gradually replacing overlapping SilentPatch fixes. Keeping
-                  SilentPatchSA in the Full Compatibility package ensures the remaining official fixes are
-                  still available while that migration is in progress.
-                  '@ | Set-Content -Path (Join-Path $pkg 'INSTALL.txt') -Encoding UTF8
+                  Do not treat map assets as engine patches. Do not apply the same fix natively
+                  and through an external hook at the same time unless compatibility has been verified.
+                  '@ | Set-Content -Path (Join-Path $fullPkg 'INSTALL.txt') -Encoding UTF8
+
+            - name: Upload Engine Modernization package
+              uses: actions/upload-artifact@v7
+              with:
+                  name: gta-reversed-EngineModernization
+                  path: package-engine
+
+            - name: Upload SilentPatch fallback package
+              uses: actions/upload-artifact@v7
+              with:
+                  name: gta-reversed-SilentPatch-Fallback
+                  path: package-silentpatch
 
             - name: Upload Full Compatibility package
               uses: actions/upload-artifact@v7
               with:
                   name: gta-reversed-ModernSA-FullCompatibility
-                  path: package
+                  path: package-full
