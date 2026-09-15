@@ -7,6 +7,7 @@
 #include "StdInc.h"
 
 #include "oswrapper.h"
+#include "extensions/ModernCompatibility.hpp"
 
 namespace {
 // GTA stores its public timers as integer milliseconds. At high refresh rates a
@@ -213,6 +214,11 @@ void CTimer::Update() {
 
     if (!ms_fnTimerFunction)
         return;
+
+    // By this point the RenderWare/platform globals are initialized. Running the
+    // modern compatibility service here keeps high-refresh and cursor/focus
+    // behaviour in sync without introducing a polling/background thread.
+    notsa::modern::Service();
 
     m_sbEnableTimeDebug = true;
 
