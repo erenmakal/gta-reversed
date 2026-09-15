@@ -10,7 +10,11 @@
 #define APP_DEFAULT_WIDTH           800
 #define APP_DEFAULT_HEIGHT          600
 
-#define APP_MAX_FPS                 30
+// Modern high-refresh default. Keep GAME_LIMIT_FPS at the original 30 Hz
+// baseline because it is used by gameplay logic; only the render limiter is
+// raised. Frame-dependent gameplay is fixed at its call sites rather than by
+// accelerating the simulation.
+#define APP_MAX_FPS                 180
 #define GAME_LIMIT_FPS              30
 #define GAME_LEVEL_FILE             "DATA\\GTA.DAT"
 

@@ -6,6 +6,7 @@
 #include "extensions/CommandLine.h"
 #include "extensions/debug.hpp"
 #include "extensions/Configuration.hpp"
+#include "extensions/ModernCompatibility.hpp"
 #include "reversiblehooks/RootHookCategory.h"
 
 void InjectHooksMain(HMODULE hThisDLL);
@@ -14,6 +15,7 @@ static constexpr auto DEFAULT_INI_FILENAME = "gta-reversed.ini";
 
 #include "extensions/Configs/FastLoader.hpp"
 #include "extensions/Configs/Miscellaneous.hpp"
+#include "extensions/Configs/ModernCompatibility.hpp"
 
 void LoadConfigurations() {
     // Firstly load the INI into the memory.
@@ -22,6 +24,7 @@ void LoadConfigurations() {
     // Then load all specific configurations.
     g_FastLoaderConfig.Load();
     g_MiscConfig.Load();
+    g_ModernCompatibilityConfig.Load();
     // ...
 }
 
@@ -87,6 +90,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
 
         InjectHooksMain(hModule);
         ApplyCommandLineHookSettings();
+        notsa::modern::Initialise();
         break;
     }
     case DLL_THREAD_ATTACH:
@@ -94,6 +98,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
     case DLL_THREAD_DETACH:
         break;
     case DLL_PROCESS_DETACH:
+        notsa::modern::Shutdown();
         break;
     }
     return TRUE;
