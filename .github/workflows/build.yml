@@ -98,6 +98,7 @@ jobs:
                   }
 
                   Copy-Item 'THIRD_PARTY/SilentPatch-LICENSE.txt' (Join-Path $pkg 'SilentPatch-LICENSE.txt')
+                  Copy-Item 'tools/Install-ModernSA.ps1' (Join-Path $pkg 'Install-ModernSA.ps1')
 
                   @'
                   GTA San Andreas - gta-reversed Modern Compatibility
@@ -109,7 +110,16 @@ jobs:
 
                   Included:
                   - gta_reversed.asi: source-level reverse-engineered engine fixes and high-refresh work.
-                  - SilentPatchSA: official Build 34.1 fallback/coverage for SilentPatch fixes not yet source-ported.
+                  - SilentPatchSA Build 34.1: official fallback/coverage for SilentPatch fixes not yet source-ported.
+                  - Install-ModernSA.ps1: verified installer/downloader for SilentPatch and optional PS2/map-content assets.
+
+                  Optional verified map-content download:
+                    powershell -ExecutionPolicy Bypass -File .\Install-ModernSA.ps1 -GamePath . -DownloadMapContent
+
+                  IMPORTANT:
+                  Map/model/IDE/IPL corrections are data assets rather than SilentPatch engine patches. They are
+                  downloaded from the map project's own release and are not blindly merged into gta3.img because
+                  map packs can overlap and have additional ModLoader/limit-adjuster dependencies.
 
                   The source-level ports are gradually replacing overlapping SilentPatch fixes. Keeping
                   SilentPatchSA in the Full Compatibility package ensures the remaining official fixes are
